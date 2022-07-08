@@ -22,21 +22,21 @@ use std::prelude::v1::*;
 use std::cmp::{PartialOrd, Ord, PartialEq, Eq, Ordering};
 use std::iter::FusedIterator;
 
-/// A reference to one or more contiguous non (decimal) digits in a string.
+/// A reference to a substring of one or more non- (decimal) digits.
 /// 
 /// [`Ord`] and [`Eq`] are implemented for this type, which is equivalent to comparing the raw [`str`] values.
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
 pub struct Text<'a>(&'a str);
 impl<'a> Text<'a> {
-    /// Reads a [`Text`] segment from the beginning of the string.
-    /// Returns [`None`] if the string starts with a (decimal) digit.
+    /// Greedily reads a (non-empty) [`Text`] segment from the beginning of the string.
+    /// Returns [`None`] if the string is empty or starts with a (decimal) digit.
     pub fn read(src: &'a str) -> Option<Self> {
         match src.char_indices().find(|ch| ch.1.is_digit(10)).map(|x| x.0).unwrap_or(src.len()) {
             0 => None,
             stop => Some(Self(&src[..stop])),
         }
     }
-    /// Returns the substring that was read via [`Text::read`].
+    /// Returns the (non-empty) substring that was read via [`Text::read`].
     pub fn as_str(&self) -> &'a str { self.0 }
 }
 
@@ -53,14 +53,14 @@ fn test_text() {
     assert_eq!(get("h2ell wor4ld"), "h");
 }
 
-/// A reference to one or more contiguous (decimal) digits in a string.
+/// A reference to a substring of one or more (decimal) digits.
 /// 
 /// [`Ord`] and [`Eq`] are implemented for this type, which behave as if using arbitrary-precision integers, but performs no allocations.
 /// Note that this means that leading zeros on a number will be ignored for the purpose of comparison.
 #[derive(Debug, Clone, Copy)]
 pub struct Number<'a>(&'a str, &'a str);
 impl<'a> Number<'a> {
-    /// Reads a [`Number`] segment from the beginning of the string.
+    /// Greedily reads a (non-empty) [`Number`] segment from the beginning of the string.
     /// Returns [`None`] if the string does not start with a (decimal) digit.
     pub fn read(src: &'a str) -> Option<Self> {
         match src.chars().position(|ch| !ch.is_digit(10)).unwrap_or(src.len()) {
@@ -71,7 +71,7 @@ impl<'a> Number<'a> {
             }
         }
     }
-    /// Returns the substring that was read via [`Number::read`].
+    /// Returns the (non-empty) substring that was read via [`Number::read`].
     pub fn as_str(&self) -> &'a str { self.0 }
 }
 impl Ord for Number<'_> {
@@ -113,7 +113,7 @@ fn test_number() {
     assert_eq!(get("002345"), "002345");
 }
 
-/// A reference to a contiguous, homogenous segment of text in a string.
+/// A reference to a homogenous segment of text in a string.
 /// 
 /// [`Ord`] and [`Eq`] are implemented for this type, which delegate to their respective types for same variant comparison,
 /// and otherwise considers every [`Segment::Number`] to come before every [`Segment::Text`].
@@ -123,7 +123,7 @@ pub enum Segment<'a> {
     Text(Text<'a>),
 }
 impl<'a> Segment<'a> {
-    /// Reads a contiguous [`Segment`] from the beginning of the string.
+    /// Greedily reads a (non-empty) [`Text`] or [`Number`] segment from the beginning of the string.
     /// Returns [`None`] if the string is empty.
     pub fn read(src: &'a str) -> Option<Self> {
         if let Some(x) = Number::read(src) { return Some(Segment::Number(x)) }
@@ -131,8 +131,8 @@ impl<'a> Segment<'a> {
         debug_assert_eq!(src, "");
         None
     }
-    /// Returns the substring that was read via [`Segment::read`].
-    fn as_str(&self) -> &'a str {
+    /// Returns the (non-empty) substring that was read via [`Segment::read`].
+    pub fn as_str(&self) -> &'a str {
         match self {
             Segment::Text(x) => x.as_str(),
             Segment::Number(x) => x.as_str(),
@@ -226,7 +226,7 @@ fn test_segment_iter() {
 
 /// Performs a lexicographic comparison of the [`Segment`] sequences of two strings.
 /// 
-/// This has the effect of ordering the strings with respect to contiguous [`Number`] and [`Text`] substrings.
+/// This has the effect of ordering the strings with respect to [`Number`] and [`Text`] substrings.
 /// 
 /// ```
 /// # use numeric_sort::cmp;
