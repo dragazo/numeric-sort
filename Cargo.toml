@@ -1,0 +1,20 @@
+[package]
+name = "numeric-sort"
+version = "0.1.0"
+authors = ["Devin Jean <emailcruzjean@yahoo.com>"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dragazo/numeric-sort"
+documentation = "https://docs.rs/numeric-sort"
+description = """
+A zero-allocation, human-readable sorting library.
+"""
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = [ "std" ]
+std = [ "no-std-compat/std" ]
+
+[dependencies]
+no-std-compat = { version = "0.4.1", default-deatures = false }
