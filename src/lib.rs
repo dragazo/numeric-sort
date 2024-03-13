@@ -247,6 +247,9 @@ fn test_cmp() {
 
 /// Sorts an array via the [`cmp`] ordering.
 /// 
+/// Because this function performs a stable sort, it must be allocating and so is only enabled with the `alloc` (default) feature.
+/// If `alloc` is not enabled or you do not require a stable sort, you may instead consider using [`sort_unstable`].
+/// 
 /// ```
 /// # use numeric_sort::sort;
 /// let mut arr = ["file-1", "file-10", "file-2"];
@@ -255,7 +258,14 @@ fn test_cmp() {
 /// ```
 #[cfg(feature = "alloc")]
 pub fn sort<T: AsRef<str>>(arr: &mut [T]) {
-    arr.sort_by(|a, b| cmp(a.as_ref(), b.as_ref())) // core's [T]::sort_by needs alloc cause it's not in-place
+    arr.sort_by(|a, b| cmp(a.as_ref(), b.as_ref())) // [T]::sort_by is stable and so requires alloc
+}
+
+/// Equivalent to [`sort`], but performs an unstable sort.
+/// 
+/// Because this function works in-place, it is available even when the default `alloc` feature is disabled.
+pub fn sort_unstable<T: AsRef<str>>(arr: &mut [T]) {
+    arr.sort_unstable_by(|a, b| cmp(a.as_ref(), b.as_ref()))
 }
 
 #[test]
@@ -266,4 +276,14 @@ fn test_sort() {
     macro_rules! sorted { ($in:expr) => {{ let mut v = $in; sort(&mut v); v }} }
     assert_eq!(&sorted!(["file-1", "file-10", "file-2"]), &["file-1", "file-2", "file-10"]);
     assert_eq!(&sorted!(["file-1".to_owned(), "file-10".to_owned(), "file-2".to_owned()]), &["file-1", "file-2", "file-10"]);
+
+    macro_rules! sorted_unstable { ($in:expr) => {{ let mut v = $in; sort_unstable(&mut v); v }} }
+    assert_eq!(&sorted_unstable!(["file-1", "file-10", "file-2"]), &["file-1", "file-2", "file-10"]);
+    assert_eq!(&sorted_unstable!(["file-1".to_owned(), "file-10".to_owned(), "file-2".to_owned()]), &["file-1", "file-2", "file-10"]);
+}
+
+#[test]
+fn test_sort_unstable() {
+    macro_rules! sorted_unstable { ($in:expr) => {{ let mut v = $in; sort_unstable(&mut v); v }} }
+    assert_eq!(&sorted_unstable!(["file-1", "file-10", "file-2"]), &["file-1", "file-2", "file-10"]);
 }
