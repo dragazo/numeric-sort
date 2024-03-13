@@ -1,26 +1,14 @@
-//! ## `numeric-sort`
-//! 
-//! A zero-allocation, human-readable sorting library.
-//! 
-//! The primary functions of interest are [`sort`] and [`cmp`].
-//! 
-//! ## `no-std`
-//! 
-//! `numeric-sort` is compatible with `no-std` projects by passing `default-features = false` to the dependency.
-//! 
-//! ```toml
-//! [dependencies]
-//! numeric-sort = { version = "...", default-features = false }
-//! ```
-
+#![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 #![no_std]
 
-extern crate no_std_compat as std;
+#[cfg(feature = "alloc")]
+extern crate alloc;
 
-use std::prelude::v1::*;
-use std::cmp::{PartialOrd, Ord, PartialEq, Eq, Ordering};
-use std::iter::FusedIterator;
+use core::cmp::{PartialOrd, Ord, PartialEq, Eq, Ordering};
+use core::iter::FusedIterator;
+
+// use core::fmt::Display;
 
 /// A reference to a substring of one or more non- (decimal) digits.
 /// 
@@ -44,6 +32,7 @@ impl<'a> Text<'a> {
 fn test_text() {
     assert_eq!(Text::read("hello world").map(|v| v.0), Some("hello world"));
     assert_eq!(Text::read("hello wor4ld").map(|v| v.0), Some("hello wor"));
+    assert_eq!(Text::read("안영하세요 wor4ld").map(|v| v.0), Some("안영하세요 wor"));
     assert_eq!(Text::read("h2ell wor4ld").map(|v| v.0), Some("h"));
     assert_eq!(Text::read("34hello wor4ld").map(|v| v.0), None);
 
@@ -51,6 +40,8 @@ fn test_text() {
     assert_eq!(get("hello world"), "hello world");
     assert_eq!(get("hello wor4ld"), "hello wor");
     assert_eq!(get("h2ell wor4ld"), "h");
+    assert_eq!(get(" h2ell wor4ld"), " h");
+    assert_eq!(get(" h 2ell wor4ld"), " h ");
 }
 
 /// A reference to a substring of one or more (decimal) digits.
@@ -58,7 +49,7 @@ fn test_text() {
 /// [`Ord`] and [`Eq`] are implemented for this type, which behave as if using arbitrary-precision integers, but performs no allocations.
 /// Note that this means that leading zeros on a number will be ignored for the purpose of comparison.
 #[derive(Debug, Clone, Copy)]
-pub struct Number<'a>(&'a str, &'a str);
+pub struct Number<'a>(&'a str, usize);
 impl<'a> Number<'a> {
     /// Greedily reads a (non-empty) [`Number`] segment from the beginning of the string.
     /// Returns [`None`] if the string does not start with a (decimal) digit.
@@ -67,7 +58,7 @@ impl<'a> Number<'a> {
             0 => None,
             stop => {
                 let zeros = src.chars().position(|ch| ch != '0').unwrap_or(src.len());
-                Some(Self(&src[..stop], &src[zeros..stop])) // ascii digits are 1 byte in utf8, so this is safe (otherwise we'd need char_indices())
+                Some(Self(&src[..stop], zeros)) // ascii digits are 1 byte in utf8, so this is safe (otherwise we'd need char_indices())
             }
         }
     }
@@ -76,24 +67,24 @@ impl<'a> Number<'a> {
 }
 impl Ord for Number<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
-        match self.1.len().cmp(&other.1.len()) {
-            Ordering::Equal => self.1.cmp(&other.1),
+        match (self.0.len() - self.1).cmp(&(other.0.len() - other.1)) {
+            Ordering::Equal => self.0[self.1..].cmp(&other.0[other.1..]),
             x => x,
         }
     }
 }
 impl PartialOrd for Number<'_> { fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) } }
-impl PartialEq for Number<'_> { fn eq(&self, other: &Self) -> bool { self.1 == other.1 } }
+impl PartialEq for Number<'_> { fn eq(&self, other: &Self) -> bool { &self.0[self.1..] == &other.0[other.1..] } }
 impl Eq for Number<'_> {}
 
 #[test]
 fn test_number() {
-    assert_eq!(Number::read("53426").map(|v| (v.0, v.1)), Some(("53426", "53426")));
-    assert_eq!(Number::read("053426").map(|v| (v.0, v.1)), Some(("053426", "53426")));
-    assert_eq!(Number::read("00053426").map(|v| (v.0, v.1)), Some(("00053426", "53426")));
-    assert_eq!(Number::read("00053d426").map(|v| (v.0, v.1)), Some(("00053", "53")));
-    assert_eq!(Number::read("000g53d426").map(|v| (v.0, v.1)), Some(("000", "")));
-    assert_eq!(Number::read("00g53d426").map(|v| (v.0, v.1)), Some(("00", "")));
+    assert_eq!(Number::read("53426").map(|v| (v.0, v.1)), Some(("53426", 0)));
+    assert_eq!(Number::read("053426").map(|v| (v.0, v.1)), Some(("053426", 1)));
+    assert_eq!(Number::read("00053426").map(|v| (v.0, v.1)), Some(("00053426", 3)));
+    assert_eq!(Number::read("00053d426").map(|v| (v.0, v.1)), Some(("00053", 3)));
+    assert_eq!(Number::read("000g53d426").map(|v| (v.0, v.1)), Some(("000", 3)));
+    assert_eq!(Number::read("00g53d426").map(|v| (v.0, v.1)), Some(("00", 2)));
     assert_eq!(Number::read("g53d426").map(|v| (v.0, v.1)), None);
 
     assert_eq!(Number::read("2345").unwrap().cmp(&Number::read("2345").unwrap()), Ordering::Equal);
@@ -106,11 +97,17 @@ fn test_number() {
     assert_eq!(Number::read("123").unwrap().cmp(&Number::read("101").unwrap()), Ordering::Greater);
 
     assert_eq!(Number::read("2345").unwrap(), Number::read("2345").unwrap());
+    assert_eq!(Number::read("2345").unwrap(), Number::read("02345").unwrap());
     assert_eq!(Number::read("002345").unwrap(), Number::read("2345").unwrap());
+
+    assert_eq!(Number::read(""), None);
+    assert_eq!(Number::read("help"), None);
 
     fn get(v: &str) -> &str { Number::read(v).unwrap().as_str() }
     assert_eq!(get("2345"), "2345");
     assert_eq!(get("002345"), "002345");
+    assert_eq!(get("00000"), "00000");
+    assert_eq!(get("0"), "0");
 }
 
 /// A reference to a homogenous segment of text in a string.
@@ -155,7 +152,7 @@ fn test_segment() {
     assert_eq!(Segment::read("000hello").unwrap().as_number().unwrap().as_str(), "000");
     assert_eq!(Segment::read("hello 453").unwrap().as_text().unwrap().as_str(), "hello ");
     assert_eq!(Segment::read(" ").unwrap().as_text().unwrap().as_str(), " ");
-    assert!(Segment::read("").is_none());
+    assert_eq!(Segment::read(""), None);
 
     fn get(v: &str) -> &str { Segment::read(v).unwrap().as_str() }
     assert_eq!(get("hello 69"), "hello ");
@@ -256,13 +253,17 @@ fn test_cmp() {
 /// sort(&mut arr);
 /// assert_eq!(&arr, &["file-1", "file-2", "file-10"]);
 /// ```
+#[cfg(feature = "alloc")]
 pub fn sort<T: AsRef<str>>(arr: &mut [T]) {
-    arr.sort_by(|a, b| cmp(a.as_ref(), b.as_ref()))
+    arr.sort_by(|a, b| cmp(a.as_ref(), b.as_ref())) // core's [T]::sort_by needs alloc cause it's not in-place
 }
 
 #[test]
+#[cfg(feature = "alloc")]
 fn test_sort() {
+    use alloc::borrow::ToOwned;
+
     macro_rules! sorted { ($in:expr) => {{ let mut v = $in; sort(&mut v); v }} }
     assert_eq!(&sorted!(["file-1", "file-10", "file-2"]), &["file-1", "file-2", "file-10"]);
-    assert_eq!(&sorted!(["file-1".to_string(), "file-10".to_string(), "file-2".to_string()]), &["file-1", "file-2", "file-10"]);
+    assert_eq!(&sorted!(["file-1".to_owned(), "file-10".to_owned(), "file-2".to_owned()]), &["file-1", "file-2", "file-10"]);
 }
