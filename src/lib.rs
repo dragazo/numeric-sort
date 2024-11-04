@@ -27,9 +27,21 @@ impl<'a> Text<'a> {
     /// Greedily reads a (non-empty) [`Text`] segment from the beginning of the string.
     /// Returns [`None`] if the string is empty or starts with a (decimal) digit.
     pub fn read(src: &'a str) -> Option<Self> {
-        match src.char_indices().find(|ch| ch.1.is_digit(10)).map(|x| x.0).unwrap_or(src.len()) {
-            0 => None,
-            stop => Some(Self { content: &src[..stop] }),
+        if Number::read(src).is_some() { return None; }
+
+        let mut pos = src.char_indices();
+        loop {
+            match pos.next() {
+                None => return if !src.is_empty() { Some(Self { content: src }) } else { None },
+                Some((i, ch)) => {
+                    if ch.is_ascii_punctuation() && Number::read(&src[i + 1..]).is_some() {
+                        return Some(Self { content: &src[..i + 1] });
+                    }
+                    if ch.is_digit(10) {
+                        return if i != 0 { Some(Self { content: &src[..i] }) } else { None };
+                    }
+                }
+            }
         }
     }
     /// Returns the (non-empty) substring that was read via [`Text::read`].
@@ -38,11 +50,27 @@ impl<'a> Text<'a> {
 
 #[test]
 fn test_text() {
+    assert_eq!(Text::read("hello world-").map(|v| v.content), Some("hello world-"));
+    assert_eq!(Text::read("hello world-4").map(|v| v.content), Some("hello world-"));
+    assert_eq!(Text::read("hello world--4").map(|v| v.content), Some("hello world-"));
+    assert_eq!(Text::read("hello world---4").map(|v| v.content), Some("hello world--"));
+    assert_eq!(Text::read("hello world----4").map(|v| v.content), Some("hello world---"));
     assert_eq!(Text::read("hello world").map(|v| v.content), Some("hello world"));
     assert_eq!(Text::read("hello wor4ld").map(|v| v.content), Some("hello wor"));
     assert_eq!(Text::read("안영하세요 wor4ld").map(|v| v.content), Some("안영하세요 wor"));
     assert_eq!(Text::read("h2ell wor4ld").map(|v| v.content), Some("h"));
     assert_eq!(Text::read("34hello wor4ld").map(|v| v.content), None);
+    assert_eq!(Text::read("-34hello wor4ld").map(|v| v.content), None);
+    assert_eq!(Text::read("--34hello wor4ld").map(|v| v.content), Some("-"));
+    assert_eq!(Text::read("+-34hello wor4ld").map(|v| v.content), Some("+"));
+    assert_eq!(Text::read("+34hello wor4ld").map(|v| v.content), None);
+    assert_eq!(Text::read("-+34hello wor4ld").map(|v| v.content), Some("-"));
+    assert_eq!(Text::read("++34hello wor4ld").map(|v| v.content), Some("+"));
+    assert_eq!(Text::read("").map(|v| v.content), None);
+
+    for p in "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~".chars() {
+        assert_eq!(Text::read(&format!("hello world{p}-4")).map(|v| v.content), Some(format!("hello world{p}").as_str()));
+    }
 
     fn get(v: &str) -> &str { Text::read(v).unwrap().as_str() }
     assert_eq!(get("hello world"), "hello world");
@@ -142,6 +170,8 @@ fn test_number() {
 
     assert_eq!(Number::read(""), None);
     assert_eq!(Number::read("help"), None);
+    assert_eq!(Number::read("-"), None);
+    assert_eq!(Number::read("+"), None);
 
     fn get(v: &str) -> &str { Number::read(v).unwrap().as_str() }
     assert_eq!(get("2345"), "2345");
@@ -291,7 +321,9 @@ pub fn cmp(a: &str, b: &str) -> Ordering {
 fn test_cmp() {
     assert_eq!(cmp("hello-456", "hello-0999"), Ordering::Less);
     assert_eq!(cmp("hellos-456", "hello-0999"), Ordering::Greater);
-    assert_eq!(cmp("hello--456", "hello-0999"), Ordering::Greater);
+    assert_eq!(cmp("hello--456", "hello-0999"), Ordering::Less);
+    assert_eq!(cmp("v1.4.12.3", "v1.4.4.3"), Ordering::Greater);
+    assert_eq!(cmp("val[-1]", "val[0]"), Ordering::Less);
 }
 
 /// Sorts an array via the [`cmp`] ordering.
