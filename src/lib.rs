@@ -2,39 +2,47 @@
 #![forbid(unsafe_code)]
 #![no_std]
 
-#[cfg(feature = "alloc")]
+#[cfg(any(test, feature = "alloc"))]
 extern crate alloc;
+
+#[cfg(test)]
+use alloc::format;
 
 use core::cmp::{PartialOrd, Ord, PartialEq, Eq, Ordering};
 use core::iter::FusedIterator;
 
-// use core::fmt::Display;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Sign {
+    Negative, Positive,
+}
 
 /// A reference to a substring of one or more non- (decimal) digits.
 /// 
 /// [`Ord`] and [`Eq`] are implemented for this type, which is equivalent to comparing the raw [`str`] values.
 #[derive(Debug, Clone, Copy, PartialOrd, Ord, PartialEq, Eq)]
-pub struct Text<'a>(&'a str);
+pub struct Text<'a> {
+    content: &'a str,
+}
 impl<'a> Text<'a> {
     /// Greedily reads a (non-empty) [`Text`] segment from the beginning of the string.
     /// Returns [`None`] if the string is empty or starts with a (decimal) digit.
     pub fn read(src: &'a str) -> Option<Self> {
         match src.char_indices().find(|ch| ch.1.is_digit(10)).map(|x| x.0).unwrap_or(src.len()) {
             0 => None,
-            stop => Some(Self(&src[..stop])),
+            stop => Some(Self { content: &src[..stop] }),
         }
     }
     /// Returns the (non-empty) substring that was read via [`Text::read`].
-    pub fn as_str(&self) -> &'a str { self.0 }
+    pub fn as_str(&self) -> &'a str { self.content }
 }
 
 #[test]
 fn test_text() {
-    assert_eq!(Text::read("hello world").map(|v| v.0), Some("hello world"));
-    assert_eq!(Text::read("hello wor4ld").map(|v| v.0), Some("hello wor"));
-    assert_eq!(Text::read("안영하세요 wor4ld").map(|v| v.0), Some("안영하세요 wor"));
-    assert_eq!(Text::read("h2ell wor4ld").map(|v| v.0), Some("h"));
-    assert_eq!(Text::read("34hello wor4ld").map(|v| v.0), None);
+    assert_eq!(Text::read("hello world").map(|v| v.content), Some("hello world"));
+    assert_eq!(Text::read("hello wor4ld").map(|v| v.content), Some("hello wor"));
+    assert_eq!(Text::read("안영하세요 wor4ld").map(|v| v.content), Some("안영하세요 wor"));
+    assert_eq!(Text::read("h2ell wor4ld").map(|v| v.content), Some("h"));
+    assert_eq!(Text::read("34hello wor4ld").map(|v| v.content), None);
 
     fn get(v: &str) -> &str { Text::read(v).unwrap().as_str() }
     assert_eq!(get("hello world"), "hello world");
@@ -49,44 +57,76 @@ fn test_text() {
 /// [`Ord`] and [`Eq`] are implemented for this type, which behave as if using arbitrary-precision integers, but performs no allocations.
 /// Note that this means that leading zeros on a number will be ignored for the purpose of comparison.
 #[derive(Debug, Clone, Copy)]
-pub struct Number<'a>(&'a str, usize);
+pub struct Number<'a> {
+    sign: Option<Sign>,
+    leading_zeros: usize,
+    content: &'a str,
+}
 impl<'a> Number<'a> {
     /// Greedily reads a (non-empty) [`Number`] segment from the beginning of the string.
     /// Returns [`None`] if the string does not start with a (decimal) digit.
     pub fn read(src: &'a str) -> Option<Self> {
-        match src.chars().position(|ch| !ch.is_digit(10)).unwrap_or(src.len()) {
+        let (sign, tail) = match src.chars().next() {
+            Some('+') => (Some(Sign::Positive), &src[1..]),
+            Some('-') => (Some(Sign::Negative), &src[1..]),
+            _ => (None, src),
+        };
+
+        match tail.chars().position(|ch| !ch.is_digit(10)).unwrap_or(tail.len()) {
             0 => None,
             stop => {
-                let zeros = src.chars().position(|ch| ch != '0').unwrap_or(src.len());
-                Some(Self(&src[..stop], zeros)) // ascii digits are 1 byte in utf8, so this is safe (otherwise we'd need char_indices())
+                let leading_zeros = tail.chars().position(|ch| ch != '0').unwrap_or(tail.len());
+                Some(Self { sign, leading_zeros, content: &src[..stop + (src.len() - tail.len())] }) // ascii digits are 1 byte in utf8, so this is safe (otherwise we'd need char_indices())
             }
         }
     }
     /// Returns the (non-empty) substring that was read via [`Number::read`].
-    pub fn as_str(&self) -> &'a str { self.0 }
+    pub fn as_str(&self) -> &'a str { self.content }
 }
 impl Ord for Number<'_> {
     fn cmp(&self, other: &Self) -> Ordering {
-        match (self.0.len() - self.1).cmp(&(other.0.len() - other.1)) {
-            Ordering::Equal => self.0[self.1..].cmp(&other.0[other.1..]),
-            x => x,
+        let t = |x: &Self| (x.content.len() - if x.sign.is_some() { 1 } else { 0 } - x.leading_zeros, &x.content[if x.sign.is_some() { 1 } else { 0 } + x.leading_zeros..]);
+
+        match (self.sign.unwrap_or(Sign::Positive), other.sign.unwrap_or(Sign::Positive)) {
+            (Sign::Positive, Sign::Positive) => t(self).cmp(&t(other)),
+            (Sign::Positive, Sign::Negative) => Ordering::Greater,
+            (Sign::Negative, Sign::Positive) => Ordering::Less,
+            (Sign::Negative, Sign::Negative) => t(other).cmp(&t(self)),
         }
     }
 }
 impl PartialOrd for Number<'_> { fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) } }
-impl PartialEq for Number<'_> { fn eq(&self, other: &Self) -> bool { &self.0[self.1..] == &other.0[other.1..] } }
+impl PartialEq for Number<'_> { fn eq(&self, other: &Self) -> bool { self.cmp(other) == Ordering::Equal } }
 impl Eq for Number<'_> {}
 
 #[test]
 fn test_number() {
-    assert_eq!(Number::read("53426").map(|v| (v.0, v.1)), Some(("53426", 0)));
-    assert_eq!(Number::read("053426").map(|v| (v.0, v.1)), Some(("053426", 1)));
-    assert_eq!(Number::read("00053426").map(|v| (v.0, v.1)), Some(("00053426", 3)));
-    assert_eq!(Number::read("00053d426").map(|v| (v.0, v.1)), Some(("00053", 3)));
-    assert_eq!(Number::read("000g53d426").map(|v| (v.0, v.1)), Some(("000", 3)));
-    assert_eq!(Number::read("00g53d426").map(|v| (v.0, v.1)), Some(("00", 2)));
-    assert_eq!(Number::read("g53d426").map(|v| (v.0, v.1)), None);
+    assert_eq!(Number::read("53426").map(|v| (v.content, v.leading_zeros)), Some(("53426", 0)));
+    assert_eq!(Number::read("-53426").map(|v| (v.content, v.leading_zeros)), Some(("-53426", 0)));
+    assert_eq!(Number::read("-53426g").map(|v| (v.content, v.leading_zeros)), Some(("-53426", 0)));
+    assert_eq!(Number::read("-053426").map(|v| (v.content, v.leading_zeros)), Some(("-053426", 1)));
+    assert_eq!(Number::read("-053426f").map(|v| (v.content, v.leading_zeros)), Some(("-053426", 1)));
+    assert_eq!(Number::read("+53426").map(|v| (v.content, v.leading_zeros)), Some(("+53426", 0)));
+    assert_eq!(Number::read("+53426g").map(|v| (v.content, v.leading_zeros)), Some(("+53426", 0)));
+    assert_eq!(Number::read("+053426").map(|v| (v.content, v.leading_zeros)), Some(("+053426", 1)));
+    assert_eq!(Number::read("+053426f").map(|v| (v.content, v.leading_zeros)), Some(("+053426", 1)));
+    assert_eq!(Number::read("053426").map(|v| (v.content, v.leading_zeros)), Some(("053426", 1)));
+    assert_eq!(Number::read("00053426").map(|v| (v.content, v.leading_zeros)), Some(("00053426", 3)));
+    assert_eq!(Number::read("00053d426").map(|v| (v.content, v.leading_zeros)), Some(("00053", 3)));
+    assert_eq!(Number::read("000g53d426").map(|v| (v.content, v.leading_zeros)), Some(("000", 3)));
+    assert_eq!(Number::read("00g53d426").map(|v| (v.content, v.leading_zeros)), Some(("00", 2)));
+    assert_eq!(Number::read("g53d426").map(|v| (v.content, v.leading_zeros)), None);
 
+    assert_eq!(Number::read("2345").unwrap().cmp(&Number::read("2346").unwrap()), Ordering::Less);
+    assert_eq!(Number::read("-2345").unwrap().cmp(&Number::read("-2346").unwrap()), Ordering::Greater);
+    assert_eq!(Number::read("-2345").unwrap().cmp(&Number::read("-2345").unwrap()), Ordering::Equal);
+    assert_eq!(Number::read("-2345").unwrap().cmp(&Number::read("+2345").unwrap()), Ordering::Less);
+    assert_eq!(Number::read("-2345").unwrap().cmp(&Number::read("2345").unwrap()), Ordering::Less);
+    assert_eq!(Number::read("+2345").unwrap().cmp(&Number::read("-2345").unwrap()), Ordering::Greater);
+    assert_eq!(Number::read("2345").unwrap().cmp(&Number::read("-2345").unwrap()), Ordering::Greater);
+    assert_eq!(Number::read("+2345").unwrap().cmp(&Number::read("+2345").unwrap()), Ordering::Equal);
+    assert_eq!(Number::read("+2345").unwrap().cmp(&Number::read("2345").unwrap()), Ordering::Equal);
+    assert_eq!(Number::read("2345").unwrap().cmp(&Number::read("+2345").unwrap()), Ordering::Equal);
     assert_eq!(Number::read("2345").unwrap().cmp(&Number::read("2345").unwrap()), Ordering::Equal);
     assert_eq!(Number::read("2345").unwrap().cmp(&Number::read("0002345").unwrap()), Ordering::Equal);
     assert_eq!(Number::read("234").unwrap().cmp(&Number::read("2345").unwrap()), Ordering::Less);
@@ -108,6 +148,15 @@ fn test_number() {
     assert_eq!(get("002345"), "002345");
     assert_eq!(get("00000"), "00000");
     assert_eq!(get("0"), "0");
+
+    for a in -128..=128 {
+        for b in -128..=128 {
+            assert_eq!(Number::read(&format!("{a}")).unwrap().cmp(&Number::read(&format!("{b}")).unwrap()), a.cmp(&b));
+            assert_eq!(Number::read(&format!("{a}")).unwrap().cmp(&Number::read(&format!("{b:+}")).unwrap()), a.cmp(&b));
+            assert_eq!(Number::read(&format!("{a:+}")).unwrap().cmp(&Number::read(&format!("{b}")).unwrap()), a.cmp(&b));
+            assert_eq!(Number::read(&format!("{a:+}")).unwrap().cmp(&Number::read(&format!("{b:+}")).unwrap()), a.cmp(&b));
+        }
+    }
 }
 
 /// A reference to a homogenous segment of text in a string.
