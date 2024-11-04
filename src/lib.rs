@@ -68,6 +68,10 @@ fn test_text() {
     assert_eq!(Text::read("++34hello wor4ld").map(|v| v.content), Some("+"));
     assert_eq!(Text::read("").map(|v| v.content), None);
 
+    for p in "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~".chars() {
+        assert_eq!(Text::read(&format!("hello world{p}-4")).map(|v| v.content), Some(format!("hello world{p}").as_str()));
+    }
+
     fn get(v: &str) -> &str { Text::read(v).unwrap().as_str() }
     assert_eq!(get("hello world"), "hello world");
     assert_eq!(get("hello wor4ld"), "hello wor");
