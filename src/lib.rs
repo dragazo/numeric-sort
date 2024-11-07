@@ -117,8 +117,8 @@ impl Ord for Number<'_> {
 
         match (self.sign.unwrap_or(Sign::Positive), other.sign.unwrap_or(Sign::Positive)) {
             (Sign::Positive, Sign::Positive) => t(self).cmp(&t(other)),
-            (Sign::Positive, Sign::Negative) => Ordering::Greater,
-            (Sign::Negative, Sign::Positive) => Ordering::Less,
+            (Sign::Positive, Sign::Negative) => if t(self).0 == 0 && t(other).0 == 0 { Ordering::Equal } else { Ordering::Greater },
+            (Sign::Negative, Sign::Positive) => if t(self).0 == 0 && t(other).0 == 0 { Ordering::Equal } else { Ordering::Less },
             (Sign::Negative, Sign::Negative) => t(other).cmp(&t(self)),
         }
     }
@@ -129,6 +129,12 @@ impl Eq for Number<'_> {}
 
 #[test]
 fn test_number() {
+    assert_eq!(Number::read("0").map(|v| (v.content, v.leading_zeros)), Some(("0", 1)));
+    assert_eq!(Number::read("+0").map(|v| (v.content, v.leading_zeros)), Some(("+0", 1)));
+    assert_eq!(Number::read("-0").map(|v| (v.content, v.leading_zeros)), Some(("-0", 1)));
+    assert_eq!(Number::read("00").map(|v| (v.content, v.leading_zeros)), Some(("00", 2)));
+    assert_eq!(Number::read("+00").map(|v| (v.content, v.leading_zeros)), Some(("+00", 2)));
+    assert_eq!(Number::read("-00").map(|v| (v.content, v.leading_zeros)), Some(("-00", 2)));
     assert_eq!(Number::read("53426").map(|v| (v.content, v.leading_zeros)), Some(("53426", 0)));
     assert_eq!(Number::read("-53426").map(|v| (v.content, v.leading_zeros)), Some(("-53426", 0)));
     assert_eq!(Number::read("-53426g").map(|v| (v.content, v.leading_zeros)), Some(("-53426", 0)));
@@ -158,6 +164,15 @@ fn test_number() {
     assert_eq!(Number::read("2345").unwrap().cmp(&Number::read("2345").unwrap()), Ordering::Equal);
     assert_eq!(Number::read("2345").unwrap().cmp(&Number::read("0002345").unwrap()), Ordering::Equal);
     assert_eq!(Number::read("234").unwrap().cmp(&Number::read("2345").unwrap()), Ordering::Less);
+    assert_eq!(Number::read("0").unwrap().cmp(&Number::read("0").unwrap()), Ordering::Equal);
+    assert_eq!(Number::read("0").unwrap().cmp(&Number::read("+0").unwrap()), Ordering::Equal);
+    assert_eq!(Number::read("0").unwrap().cmp(&Number::read("-0").unwrap()), Ordering::Equal);
+    assert_eq!(Number::read("+0").unwrap().cmp(&Number::read("0").unwrap()), Ordering::Equal);
+    assert_eq!(Number::read("+0").unwrap().cmp(&Number::read("+0").unwrap()), Ordering::Equal);
+    assert_eq!(Number::read("+0").unwrap().cmp(&Number::read("-0").unwrap()), Ordering::Equal);
+    assert_eq!(Number::read("-0").unwrap().cmp(&Number::read("0").unwrap()), Ordering::Equal);
+    assert_eq!(Number::read("-0").unwrap().cmp(&Number::read("+0").unwrap()), Ordering::Equal);
+    assert_eq!(Number::read("-0").unwrap().cmp(&Number::read("-0").unwrap()), Ordering::Equal);
     assert_eq!(Number::read("000000234").unwrap().cmp(&Number::read("2345").unwrap()), Ordering::Less);
     assert_eq!(Number::read("000000234").unwrap().cmp(&Number::read("236521548").unwrap()), Ordering::Less);
     assert_eq!(Number::read("000000234").unwrap().cmp(&Number::read("000000236521548").unwrap()), Ordering::Less);
@@ -186,6 +201,14 @@ fn test_number() {
             assert_eq!(Number::read(&format!("{a:+}")).unwrap().cmp(&Number::read(&format!("{b}")).unwrap()), a.cmp(&b));
             assert_eq!(Number::read(&format!("{a:+}")).unwrap().cmp(&Number::read(&format!("{b:+}")).unwrap()), a.cmp(&b));
         }
+
+        assert_eq!(Number::read("0").unwrap().cmp(&Number::read(&format!("{a:+}")).unwrap()), 0.cmp(&a));
+        assert_eq!(Number::read("+0").unwrap().cmp(&Number::read(&format!("{a:+}")).unwrap()), 0.cmp(&a));
+        assert_eq!(Number::read("-0").unwrap().cmp(&Number::read(&format!("{a:+}")).unwrap()), 0.cmp(&a));
+
+        assert_eq!(Number::read(&format!("{a:+}")).unwrap().cmp(&Number::read("0").unwrap()), a.cmp(&0));
+        assert_eq!(Number::read(&format!("{a:+}")).unwrap().cmp(&Number::read("+0").unwrap()), a.cmp(&0));
+        assert_eq!(Number::read(&format!("{a:+}")).unwrap().cmp(&Number::read("-0").unwrap()), a.cmp(&0));
     }
 }
 
