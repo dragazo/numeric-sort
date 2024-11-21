@@ -34,7 +34,7 @@ impl<'a> Text<'a> {
             match pos.next() {
                 None => return if !src.is_empty() { Some(Self { content: src }) } else { None },
                 Some((i, ch)) => {
-                    if ch.is_ascii_punctuation() && Number::read(&src[i + 1..]).is_some() {
+                    if (ch.is_ascii_whitespace() || ch.is_ascii_punctuation()) && Number::read(&src[i + 1..]).is_some() {
                         return Some(Self { content: &src[..i + 1] });
                     }
                     if ch.is_digit(10) {
@@ -50,6 +50,11 @@ impl<'a> Text<'a> {
 
 #[test]
 fn test_text() {
+    assert_eq!(Text::read("hello world ").map(|v| v.content), Some("hello world "));
+    assert_eq!(Text::read("hello world 7").map(|v| v.content), Some("hello world "));
+    assert_eq!(Text::read("hello world  7").map(|v| v.content), Some("hello world  "));
+    assert_eq!(Text::read("hello world -7").map(|v| v.content), Some("hello world "));
+    assert_eq!(Text::read("hello world  -7").map(|v| v.content), Some("hello world  "));
     assert_eq!(Text::read("hello world-").map(|v| v.content), Some("hello world-"));
     assert_eq!(Text::read("hello world-4").map(|v| v.content), Some("hello world-"));
     assert_eq!(Text::read("hello world--4").map(|v| v.content), Some("hello world-"));
@@ -347,6 +352,9 @@ fn test_cmp() {
     assert_eq!(cmp("hello--456", "hello-0999"), Ordering::Less);
     assert_eq!(cmp("v1.4.12.3", "v1.4.4.3"), Ordering::Greater);
     assert_eq!(cmp("val[-1]", "val[0]"), Ordering::Less);
+    assert_eq!(cmp("val[-1]", "val[2]"), Ordering::Less);
+    assert_eq!(cmp("val -1", "val 0"), Ordering::Less);
+    assert_eq!(cmp("val -1", "val 2"), Ordering::Less);
 }
 
 /// Sorts an array via the [`cmp`] ordering.
