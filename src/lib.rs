@@ -27,7 +27,7 @@ impl<'a> Text<'a> {
     /// Greedily reads a (non-empty) [`Text`] segment from the beginning of the string.
     /// Returns [`None`] if the string is empty or starts with a (decimal) digit.
     pub fn read(src: &'a str) -> Option<Self> {
-        if Number::read(src).is_some() { return None; }
+        if src.chars().next().unwrap_or('\0').is_digit(10) { return None; }
 
         let mut pos = src.char_indices();
         loop {
@@ -65,10 +65,10 @@ fn test_text() {
     assert_eq!(Text::read("안영하세요 wor4ld").map(|v| v.content), Some("안영하세요 wor"));
     assert_eq!(Text::read("h2ell wor4ld").map(|v| v.content), Some("h"));
     assert_eq!(Text::read("34hello wor4ld").map(|v| v.content), None);
-    assert_eq!(Text::read("-34hello wor4ld").map(|v| v.content), None);
+    assert_eq!(Text::read("-34hello wor4ld").map(|v| v.content), Some("-"));
     assert_eq!(Text::read("--34hello wor4ld").map(|v| v.content), Some("-"));
     assert_eq!(Text::read("+-34hello wor4ld").map(|v| v.content), Some("+"));
-    assert_eq!(Text::read("+34hello wor4ld").map(|v| v.content), None);
+    assert_eq!(Text::read("+34hello wor4ld").map(|v| v.content), Some("+"));
     assert_eq!(Text::read("-+34hello wor4ld").map(|v| v.content), Some("-"));
     assert_eq!(Text::read("++34hello wor4ld").map(|v| v.content), Some("+"));
     assert_eq!(Text::read("").map(|v| v.content), None);
@@ -228,11 +228,11 @@ pub enum Segment<'a> {
 }
 impl<'a> Segment<'a> {
     /// Greedily reads a (non-empty) [`Text`] or [`Number`] segment from the beginning of the string.
-    /// Returns [`None`] if the string is empty.
-    pub fn read(src: &'a str) -> Option<Self> {
-        if let Some(x) = Number::read(src) { return Some(Segment::Number(x)) }
+    /// Number values are preferred over text values, but can be disabled (entirely) by setting `force_text` to `true`.
+    /// Returns [`None`] if a segment cannot be extracted.
+    pub fn read(src: &'a str, force_text: bool) -> Option<Self> {
+        if !force_text { if let Some(x) = Number::read(src) { return Some(Segment::Number(x)) } }
         if let Some(x) = Text::read(src) { return Some(Segment::Text(x)) }
-        debug_assert_eq!(src, "");
         None
     }
     /// Returns the (non-empty) substring that was read via [`Segment::read`].
@@ -254,50 +254,63 @@ impl<'a> Segment<'a> {
 
 #[test]
 fn test_segment() {
-    assert_eq!(Segment::read("00453hello").unwrap().as_number().unwrap().as_str(), "00453");
-    assert_eq!(Segment::read("453hello").unwrap().as_number().unwrap().as_str(), "453");
-    assert_eq!(Segment::read("000hello").unwrap().as_number().unwrap().as_str(), "000");
-    assert_eq!(Segment::read("hello 453").unwrap().as_text().unwrap().as_str(), "hello ");
-    assert_eq!(Segment::read(" ").unwrap().as_text().unwrap().as_str(), " ");
-    assert_eq!(Segment::read(""), None);
+    assert_eq!(Segment::read("00453hello", false).unwrap().as_number().unwrap().as_str(), "00453");
+    assert_eq!(Segment::read("453hello", false).unwrap().as_number().unwrap().as_str(), "453");
+    assert_eq!(Segment::read("000hello", false).unwrap().as_number().unwrap().as_str(), "000");
+    assert_eq!(Segment::read("hello 453", false).unwrap().as_text().unwrap().as_str(), "hello ");
+    assert_eq!(Segment::read(" ", false).unwrap().as_text().unwrap().as_str(), " ");
+    assert_eq!(Segment::read("", false), None);
 
-    fn get(v: &str) -> &str { Segment::read(v).unwrap().as_str() }
+    fn get(v: &str) -> &str { Segment::read(v, false).unwrap().as_str() }
     assert_eq!(get("hello 69"), "hello ");
     assert_eq!(get("453 hello 69"), "453");
     assert_eq!(get("00453 hello 69"), "00453");
     assert_eq!(get("000"), "000");
     assert_eq!(get("abc"), "abc");
 
-    assert_eq!(Segment::read("00000").unwrap().cmp(&Segment::read("aaaaa").unwrap()), Ordering::Less);
-    assert_eq!(Segment::read("aaaaa").unwrap().cmp(&Segment::read("00000").unwrap()), Ordering::Greater);
-    assert_eq!(Segment::read("0000").unwrap().cmp(&Segment::read("aaaaa").unwrap()), Ordering::Less);
-    assert_eq!(Segment::read("aaaa").unwrap().cmp(&Segment::read("00000").unwrap()), Ordering::Greater);
-    assert_eq!(Segment::read("00000").unwrap().cmp(&Segment::read("aaaa").unwrap()), Ordering::Less);
-    assert_eq!(Segment::read("aaaaa").unwrap().cmp(&Segment::read("0000").unwrap()), Ordering::Greater);
+    assert_eq!(Segment::read("00000", false).unwrap().cmp(&Segment::read("aaaaa", false).unwrap()), Ordering::Less);
+    assert_eq!(Segment::read("aaaaa", false).unwrap().cmp(&Segment::read("00000", false).unwrap()), Ordering::Greater);
+    assert_eq!(Segment::read("0000", false).unwrap().cmp(&Segment::read("aaaaa", false).unwrap()), Ordering::Less);
+    assert_eq!(Segment::read("aaaa", false).unwrap().cmp(&Segment::read("00000", false).unwrap()), Ordering::Greater);
+    assert_eq!(Segment::read("00000", false).unwrap().cmp(&Segment::read("aaaa", false).unwrap()), Ordering::Less);
+    assert_eq!(Segment::read("aaaaa", false).unwrap().cmp(&Segment::read("0000", false).unwrap()), Ordering::Greater);
+
+    assert_eq!(Segment::read("24", false).unwrap().as_number().unwrap().as_str(), "24");
+    assert_eq!(Segment::read("24", true).is_none(), true);
+
+    assert_eq!(Segment::read("-24", false).unwrap().as_number().unwrap().as_str(), "-24");
+    assert_eq!(Segment::read("-24", true).unwrap().as_text().unwrap().as_str(), "-");
+
+    assert_eq!(Segment::read("+24", false).unwrap().as_number().unwrap().as_str(), "+24");
+    assert_eq!(Segment::read("+24", true).unwrap().as_text().unwrap().as_str(), "+");
 }
 
 /// An iterator over the [`Segment`] values within a string.
 /// 
 /// This is a potentially-empty sequence of alternating [`Segment::Number`] and [`Segment::Text`] values (not necessarily in that order).
 #[derive(Clone, Copy)]
-pub struct SegmentIter<'a>(&'a str);
+pub struct SegmentIter<'a> {
+    src: &'a str,
+    force_text: bool,
+}
 impl<'a> SegmentIter<'a> {
     /// Constructs a new [`SegmentIter`] that iterates over the segments of the string.
     /// If the string is empty, the resulting iterator is likewise an empty sequence.
     pub fn new(src: &'a str) -> Self {
-        Self(src)
+        Self { src, force_text: false }
     }
     /// Returns the remaining portion of the original string that has not yet been iterated.
     /// Returns an empty string if the iterator has been exhausted.
     pub fn as_str(&self) -> &'a str {
-        self.0
+        self.src
     }
 }
 impl<'a> Iterator for SegmentIter<'a> {
     type Item = Segment<'a>;
     fn next(&mut self) -> Option<Self::Item> {
-        let res = Segment::read(self.0)?;
-        self.0 = &self.0[res.as_str().len()..];
+        let res = Segment::read(self.src, self.force_text)?;
+        self.force_text = res.as_number().is_some();
+        self.src = &self.src[res.as_str().len()..];
         Some(res)
     }
 }
@@ -355,6 +368,33 @@ fn test_cmp() {
     assert_eq!(cmp("val[-1]", "val[2]"), Ordering::Less);
     assert_eq!(cmp("val -1", "val 0"), Ordering::Less);
     assert_eq!(cmp("val -1", "val 2"), Ordering::Less);
+
+    assert_eq!(cmp("2024-10-22", "2024-9-22"), Ordering::Greater);
+    assert_eq!(cmp("2024-6-22", "2024-10-22"), Ordering::Less);
+    assert_eq!(cmp("2024-10-22", "2024-10-22"), Ordering::Equal);
+    assert_eq!(cmp("2024-10-22", "2024-11-22"), Ordering::Less);
+    assert_eq!(cmp("2024-10-22", "2024-10-6"), Ordering::Greater);
+    assert_eq!(cmp("2024-10-22", "2024-10-06"), Ordering::Greater);
+    assert_eq!(cmp("2024-10-22", "300-10-22"), Ordering::Greater);
+    assert_eq!(cmp("2024-10-22", "03000-10-22"), Ordering::Less);
+
+    assert_eq!(cmp("2024+10+22", "2024+9+22"), Ordering::Greater);
+    assert_eq!(cmp("2024+6+22", "2024+10+22"), Ordering::Less);
+    assert_eq!(cmp("2024+10+22", "2024+10+22"), Ordering::Equal);
+    assert_eq!(cmp("2024+10+22", "2024+11+22"), Ordering::Less);
+    assert_eq!(cmp("2024+10+22", "2024+10+6"), Ordering::Greater);
+    assert_eq!(cmp("2024+10+22", "2024+10+06"), Ordering::Greater);
+    assert_eq!(cmp("2024+10+22", "300+10+22"), Ordering::Greater);
+    assert_eq!(cmp("2024+10+22", "03000+10+22"), Ordering::Less);
+
+    assert_eq!(cmp("2024/10/22", "2024/9/22"), Ordering::Greater);
+    assert_eq!(cmp("2024/6/22", "2024/10/22"), Ordering::Less);
+    assert_eq!(cmp("2024/10/22", "2024/10/22"), Ordering::Equal);
+    assert_eq!(cmp("2024/10/22", "2024/11/22"), Ordering::Less);
+    assert_eq!(cmp("2024/10/22", "2024/10/6"), Ordering::Greater);
+    assert_eq!(cmp("2024/10/22", "2024/10/06"), Ordering::Greater);
+    assert_eq!(cmp("2024/10/22", "300/10/22"), Ordering::Greater);
+    assert_eq!(cmp("2024/10/22", "03000/10/22"), Ordering::Less);
 }
 
 /// Sorts an array via the [`cmp`] ordering.
